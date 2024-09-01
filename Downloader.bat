@@ -15,6 +15,7 @@ REM 0x24a651f50e8 (238): https://prod-volcdn-gamestarter.kurogame.com/pcstarter/
 set IndexURL=https://prod-cn-alicdn-gamestarter.kurogame.com/pcstarter/prod/game/G152/10003_Y8xXrXk65DqFHEDgApn3cpK5lfczpFx5/index.json
 set OUTPATH=Wuthering Waves Game
 set selectCDN=1
+
 call :DelCache
 setlocal ENABLEDELAYEDEXPANSION
 
@@ -76,49 +77,48 @@ DEL /F /Q DownloadList.txt >nul 2>nul
 set /a index=amount-1
 for /l %%i in (0,1,%index%) do (
     echo 索引：%%i
-    set /a jsonindex 
     for /F "tokens=* delims=*" %%b in ('jq.exe -r ".resource[%%i].dest" "resources.json"') do (
         set curFile=%%b
-        echo 文件：!curFile!
-        echo %CDN%%resourcesBase%!curFile! >> DownloadList.txt
-        echo    out=%OUTPATH%!curFile! >> DownloadList.txt
     )
+    echo 文件：!curFile!
+    echo %CDN%%resourcesBase%!curFile! >> DownloadList.txt
+    echo    out=%OUTPATH%!curFile! >> DownloadList.txt
 )
 
-.\aria2c --input-file=DownloadList.txt --continue=true --max-concurrent-downloads=20 --split=32 --file-allocation=prealloc --remote-time=true --check-certificate=false --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0"
+.\aria2c.exe --input-file=DownloadList.txt --continue=true --max-concurrent-downloads=20 --split=32 --file-allocation=prealloc --remote-time=true --check-certificate=false --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0"
 echo 文件下载完成
 echo 开始校验文件
 pause
 
 REM 文件校验部分
-:MD5DEBUG
-DEL /F /Q 错误文件.txt >nul 2>nul
 set ErrorCount=0
-for /f "tokens=*" %%i in ('jq.exe -r ".resource[] | .dest + \" \" + (.size | tostring) + \" \" + .md5" resources.json') do (
-    set "line=%%i"
+for /l %%i in (0,1,%index%) do (
+    echo 索引：%%i
 
-    REM 提取目标路径、文件大小和 MD5 值
-    for /f "tokens=1,2,3" %%a in ("!line!") do (
-        set dest=%OUTPATH%%%a
-        set expected_size=%%b
-        set expected_md5=%%c
+    REM 读取 dest、size 和 md5
+    for /f "delims=" %%b in ('jq.exe -r ".resource[%%i].dest" "resources.json"') do (
+        set "dest=%OUTPATH%%%b"
+    )
+    for /f "delims=" %%c in ('jq.exe -r ".resource[%%i].size" "resources.json"') do (
+        set "expected_size=%%c"
+    )
+    for /f "delims=" %%d in ('jq.exe -r ".resource[%%i].md5" "resources.json"') do (
+        set "expected_md5=%%d"
+    )
 
-        REM 将 JSON 中的 dest 转换为 Windows 格式路径
-        set "dest=!dest:/=\!"
+    REM 将 JSON 中的 dest 转换为 Windows 格式路径
+    set "dest=!dest:/=\!"
 
-        if exist "!dest!" (
-            echo [OK] 文件存在: !dest!
+    if exist "!dest!" (
+        echo [OK] 文件存在: !dest!
 
-            for /f "delims=" %%d in ('powershell.exe -command "(Get-Item '!dest!').length"') do (
-                set "actual_size=%%d"
-            )
+        REM 读取文件大小
+        for /f "delims=" %%d in ('powershell.exe -command "(Get-Item '!dest!').length"') do (
+            set "actual_size=%%d"
+        )
 
-            if "!actual_size!"=="!expected_size!" (
-                echo [OK] 文件大小正确: !dest!
-            ) else (
-                echo [ERROR] 文件大小不正确: !dest! 预期: !expected_size!, 实际: !actual_size!
-				set /a ErrorCount=%ErrorCount%+1
-            )
+        if "!actual_size!"=="!expected_size!" (
+            echo [OK] 文件大小正确: !dest!
 
             REM 计算文件的 MD5
             for /f "delims=" %%e in ('powershell.exe -command "(Get-FileHash '!dest!' -Algorithm MD5).Hash"') do (
@@ -127,23 +127,54 @@ for /f "tokens=*" %%i in ('jq.exe -r ".resource[] | .dest + \" \" + (.size | tos
 
             set "actual_md5=!actual_md5: =!"
             if /i "!actual_md5!"=="!expected_md5!" (
-                echo [OK] MD5 正确: !dest!
+                echo [OK] 文件 MD5 正确: !dest!
             ) else (
-                echo [ERROR] MD5 不正确: !dest! 预期: !expected_md5!, 实际: !actual_md5!
-				set /a ErrorCount=%ErrorCount%+1
+                echo [ERROR] 文件 MD5 不正确: !dest! 预期: !expected_md5!, 实际: !actual_md5!
+            	set /a ErrorCount=!ErrorCount!+1
+
+                REM 错误文件处理
+                for /F "tokens=* delims=*" %%b in ('jq.exe -r ".resource[%%i].dest" "resources.json"') do (
+                   set curFile=%%b
+                )
+                echo 文件 MD5 不正确: !dest! >> 错误文件.txt
+                echo 预期: !expected_md5!，实际: !actual_md5! >> 错误文件.txt
+                echo 下载地址：%CDN%%resourcesBase%!curFile! >> 错误文件.txt
+                echo. >> 错误文件.txt
             )
         ) else (
-            echo [ERROR] 文件不存在: !dest!
-			set /a ErrorCount=%ErrorCount%+1
+            echo [ERROR] 文件大小不正确: !dest! 预期: !expected_size!, 实际: !actual_size!
+            set /a ErrorCount=!ErrorCount!+1
+
+            REM 错误文件处理
+            for /F "tokens=* delims=*" %%b in ('jq.exe -r ".resource[%%i].dest" "resources.json"') do (
+                set curFile=%%b
+            )
+            echo 文件大小不正确: !dest! >> 错误文件.txt
+            echo 预期: !expected_size!，实际: !actual_size! >> 错误文件.txt
+            echo 下载地址：%CDN%%resourcesBase%!curFile! >> 错误文件.txt
+            echo. >> 错误文件.txt
         )
+    ) else (
+        echo [ERROR] 文件不存在: !dest!
+    	set /a ErrorCount=!ErrorCount!+1
+
+        REM 错误文件处理
+        for /F "tokens=* delims=*" %%b in ('jq.exe -r ".resource[%%i].dest" "resources.json"') do (
+            set curFile=%%b
+        )
+        echo 文件不存在: !dest! >> 错误文件.txt
+        echo 下载地址：%CDN%%resourcesBase%!curFile! >> 错误文件.txt
+        echo. >> 错误文件.txt
     )
 )
+
 echo 文件校验完成
 if %ErrorCount%==0 (
     echo 没有错误
     call :DelCache
 ) else (
     echo 有 %ErrorCount% 个文件校验未通过
+    echo 请查看 错误文件.txt 手动下载错误的文件
 )
 endlocal
 pause
@@ -153,19 +184,20 @@ exit
 DEL /F /Q index.json >nul 2>nul
 DEL /F /Q resources.json >nul 2>nul
 DEL /F /Q DownLoadList.txt >nul 2>nul
+DEL /F /Q 错误文件.txt >nul 2>nul
 goto :eof
 
 :GzipDecompression
 set file=%1
 REM 检查文件是否为Gzip (0x1F 0x8B)
 for /f %%i in ('powershell.exe -command "if ((Get-Content -Path '%file%' -Raw -Encoding Byte)[0] -eq 0x1F -and (Get-Content -Path '%file%' -Raw -Encoding Byte)[1] -eq 0x8B) { 'true' } else { 'false' }"') do (
-    set "fileType=%%i"
+    set isGzip=%%i
 )
 
 REM 如果是Gzip，则解压
-if "%fileType%"=="true" (
-    powershell.exe -command "Add-Type -A 'System.IO.Compression.FileSystem'; [IO.Compression.CompressionMode]::Decompress; [IO.Compression.GzipStream]::new([IO.File]::OpenRead('%file%'), [IO.Compression.CompressionMode]::Decompress).CopyTo([IO.File]::Create('%file%_decompressed.json'));"
+if "%isGzip%"=="true" (
+    powershell.exe -command "Add-Type -A 'System.IO.Compression.FileSystem'; [IO.Compression.CompressionMode]::Decompress; [IO.Compression.GzipStream]::new([IO.File]::OpenRead('%file%'), [IO.Compression.CompressionMode]::Decompress).CopyTo([IO.File]::Create('%file%_decompressed'));"
     DEL /F /Q %file% >nul 2>nul
-    ren %file%_decompressed.json %file%
+    ren %file%_decompressed %file%
 )
 goto :eof
