@@ -1,0 +1,40 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'cyt.wuwadownloader'
+version = '1.0-SNAPSHOT'
+mainClassName = 'cyt.wuwadownloader.Main'
+compileJava.options.encoding = "UTF-8"
+compileTestJava.options.encoding = "UTF-8"
+
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'com.google.code.gson:gson:2.13.1'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    compileOnly 'org.projectlombok:lombok:1.18.38'
+    annotationProcessor 'org.projectlombok:lombok:1.18.38'
+    implementation 'me.tongfei:progressbar:0.10.1'
+    implementation 'org.fusesource.jansi:jansi:2.4.2'
+}
+
+jar {
+    exclude '*.proto'
+
+    manifest {
+        attributes 'Main-Class': mainClassName
+    }
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+
+    destinationDirectory = file("$projectDir")
+}
