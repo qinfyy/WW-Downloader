@@ -38,3 +38,7 @@ jar {
 
     destinationDirectory = file("$projectDir")
 }
+
+tasks.run.configure {
+    standardInput = System.in
+}

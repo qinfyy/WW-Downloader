@@ -11,6 +11,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Scanner;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.Executors;
@@ -43,24 +44,123 @@ public class Main {
         AnsiConsole.systemInstall();
         System.out.print("\033]0; Wuthering Waves Downloader \007");
 
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            AnsiConsole.systemUninstall();
+            System.out.println("\n程序退出");
+        }));
+
         try {
-            String 初始URL;
             try {
                 字段_配置 = Json工具.到对象(Files.readString(Paths.get("配置.json")), 配置.class);
-                初始URL = 字段_配置.getIndexURL();
-                输出路径 = 字段_配置.get保存目录();
+                输出路径 = 字段_配置.get默认保存目录();
             } catch (Exception e) {
                 System.err.println("无法读取配置文件：" + e);
-                AnsiConsole.systemUninstall();
                 return;
             }
 
-            // 下载并解析index.json
-            String indexJson = 实用工具.GET_获取字符串(初始URL);
-            IndexJson index = Json工具.到对象(indexJson, IndexJson.class);
+            System.out.print("\033[H\033[2J");
+            System.out.flush();
+
+            版本配置[] 选项列表 = {
+                    new 版本配置("Prod - OS", 字段_配置.getOSPROD()),
+                    new 版本配置("Prod - CN", 字段_配置.getCNPROD()),
+            };
+
+            System.out.println("正在获取版本信息...");
+            int 成功获取数量 = 0;
+
+            for (int i = 0; i < 选项列表.length; i++) {
+                版本配置 选项 = 选项列表[i];
+                System.out.print("\r获取版本信息: " + (i + 1) + "/" + 选项列表.length);
+
+                String indexJson = null;
+                try {
+                    indexJson = 实用工具.GET_获取字符串(选项.url);
+                } catch (Exception e) {
+                    System.err.println("\n请求异常: " + 选项.url + " - " + e.getMessage());
+                }
+
+                if (indexJson == null || indexJson.isEmpty()) {
+                    System.err.println("\n获取版本失败: " + 选项.url);
+                    Thread.sleep(3000);
+                    continue;
+                }
+
+                try {
+                    选项.index = Json工具.到对象(indexJson, IndexJson.class);
+                    if (选项.index != null && 选项.index.getDefaultConfig() != null) {
+                        选项.版本 = 选项.index.getDefaultConfig().getVersion();
+                        成功获取数量++;
+                    } else {
+                        选项.版本 = "未知";
+                    }
+                } catch (Exception e) {
+                    System.err.println("\n解析JSON失败: " + 选项.url + " - " + e.getMessage());
+                    选项.版本 = "解析失败";
+                }
+            }
+
+            if (成功获取数量 == 0) {
+                System.err.println("\n\n错误：无法获取任何版本信息，程序即将退出");
+                Thread.sleep(4000);
+                return;
+            }
+
+            System.out.println("\033[H\033[2J");
+            System.out.flush();
+
+            System.out.println("请选择下载版本:");
+            for (int i = 0; i < 选项列表.length; i++) {
+                版本配置 选项 = 选项列表[i];
+                System.out.printf("%d. %s (%s)%n", i + 1, 选项.名称, 选项.版本);
+            }
+
+            Scanner scanner = new Scanner(System.in);
+            int 选择;
+            do {
+                System.out.print("输入选择 (1-" + 选项列表.length + "): ");
+                String 输入 = scanner.nextLine().trim();
+
+                try {
+                    选择 = Integer.parseInt(输入);
+                } catch (NumberFormatException e) {
+                    选择 = 0;
+                }
+
+                if (选择 < 1 || 选择 > 选项列表.length) {
+                    System.out.println("无效选择，请输入1-" + 选项列表.length + "的数字");
+                }
+
+            } while (选择 < 1 || 选择 > 选项列表.length);
+
+            System.out.println("\n默认保存目录: " + 输出路径);
+            System.out.print("请输入下载游戏的目录（按回车键使用默认保存目录）：");
+            String 用户输入 = scanner.nextLine().trim();
+
+            if (!用户输入.isEmpty()) {
+                Path 新路径 = Paths.get(用户输入).normalize().toAbsolutePath();
+                if (!Files.exists(新路径)) {
+                    try {
+                        Files.createDirectories(新路径);
+                        System.out.println("已创建目录: " + 新路径);
+                    } catch (IOException e) {
+                        System.err.println("无法创建目录，使用默认配置: " + e.getMessage());
+                    }
+                }
+                if (Files.isDirectory(新路径) && Files.isWritable(新路径)) {
+                    输出路径 = 新路径.toString();
+                    System.out.println("已设置保存目录为: " + 输出路径);
+                } else {
+                    System.err.println("路径无效或无写入权限，使用默认配置");
+                }
+            }
+
+            System.out.println();
+
+            版本配置 选择的选项 = 选项列表[选择 - 1];
+            IndexJson index = 选择的选项.index;
             if (index == null) {
-                System.err.println("无法获取 index.json" + 初始URL);
-                AnsiConsole.systemUninstall();
+                System.err.println("无法获取版本信息：" + 选择的选项.url);
                 return;
             }
 
@@ -70,16 +170,15 @@ public class Main {
             String CDN地址 = 选择最快的CDN(index.getDefaultConfig().getCdnList());
             if (CDN地址 == null) {
                 System.err.println("没有可用的CDN");
-                AnsiConsole.systemUninstall();
                 return;
             }
             System.out.println("选择CDN: " + CDN地址);
 
+            System.out.println("正在获取资源列表");
             String resourcesJson = 实用工具.GET_获取字符串(CDN地址 + 资源路径);
             ResourceJson resourcesObj = Json工具.到对象(resourcesJson, ResourceJson.class);
             if (resourcesObj == null) {
                 System.err.println("无法获取资源列表");
-                AnsiConsole.systemUninstall();
                 return;
             }
 
@@ -91,12 +190,13 @@ public class Main {
                     .sum();
             System.out.println("总大小: " + 实用工具.格式化文件大小(总大小));
 
-            Files.createDirectories(Paths.get(字段_配置.get保存目录()));
+            Files.createDirectories(Paths.get(输出路径));
             Files.deleteIfExists(Paths.get(字段_配置.get错误日志路径()));
 
             AtomicLong 成功数量 = new AtomicLong(0);
             AtomicLong 失败数量 = new AtomicLong(0);
 
+            System.out.println();
             // 创建进度条
             try (ProgressBar 进度条 = new ProgressBarBuilder()
                     .setTaskName("下载")
@@ -112,7 +212,7 @@ public class Main {
                 for (ResourceJson.ResourceItem 原始资源 : resourcesObj.getResource()) {
                     final ResourceJson.ResourceItem 资源 = 原始资源;
                     final String 游戏文件 = 实用工具.确保不以斜杠开头(资源.getDest());
-                    final Path 本地路径 = Paths.get(字段_配置.get保存目录(), 游戏文件);
+                    final Path 本地路径 = Paths.get(输出路径, 游戏文件);
                     final String 下载地址 = CDN地址 + 资源基础路径 + 游戏文件;
 
                     线程池.submit(() -> {
@@ -153,8 +253,18 @@ public class Main {
             }
         } catch (Exception e) {
             System.err.println("程序发生错误：" + e);
-        } finally {
-            AnsiConsole.systemUninstall();
+        }
+    }
+
+    private static class 版本配置 {
+        private final String 名称;
+        private final String url;
+        private String 版本 = "未知版本";
+        private IndexJson index = null;
+
+        public 版本配置(String 名称, String url) {
+            this.名称 = 名称;
+            this.url = url;
         }
     }
 
